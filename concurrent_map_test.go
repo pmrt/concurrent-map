@@ -14,7 +14,7 @@ type Animal struct {
 
 func TestMapCreation(t *testing.T) {
 	m := New[string]()
-	if m == nil {
+	if m.shards == nil {
 		t.Error("map is null.")
 	}
 
@@ -419,9 +419,9 @@ func TestConcurrent(t *testing.T) {
 }
 
 func TestJsonMarshal(t *testing.T) {
-	SHARD_COUNT = 2
+	DefaultShardCount = 2
 	defer func() {
-		SHARD_COUNT = 32
+		DefaultShardCount = 32
 	}()
 	expected := "{\"a\":1,\"b\":2}"
 	m := New[int]()

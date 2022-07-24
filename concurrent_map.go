@@ -5,30 +5,56 @@ import (
 	"sync"
 )
 
-var SHARD_COUNT = 32
+var DefaultShardCount = 32
+
+type ConcurrentMap[V any] struct {
+	shardCount int
+	shards     []*Shard[V]
+}
 
 // A "thread" safe map of type string:Anything.
-// To avoid lock bottlenecks this map is dived to several (SHARD_COUNT) map shards.
-type ConcurrentMap[V any] []*ConcurrentMapShared[V]
+// To avoid lock bottlenecks this map is dived to several map shards.
+// type CMap[V any] []*Shard[V]
 
 // A "thread" safe string to anything map.
-type ConcurrentMapShared[V any] struct {
+type Shard[V any] struct {
 	items      map[string]V
 	sync.Mutex // Read Write mutex, guards access to internal map.
 }
 
 // Creates a new concurrent map.
+// func New[V any]() CMap[V] {
+// 	m := make(CMap[V], DefaultShardCount)
+// 	for i := 0; i < DefaultShardCount; i++ {
+// 		m[i] = &Shard[V]{
+// 			items: make(map[string]V),
+// 		}
+// 	}
+// 	return m
+// }
+
 func New[V any]() ConcurrentMap[V] {
-	m := make(ConcurrentMap[V], SHARD_COUNT)
-	for i := 0; i < SHARD_COUNT; i++ {
-		m[i] = &ConcurrentMapShared[V]{items: make(map[string]V)}
+	return NewWithConcurrencyLevel[V](DefaultShardCount)
+}
+
+// Creates a new concurrent map with a specific concurrency level. Concurrency
+// level determines the number of shards which will be used.
+func NewWithConcurrencyLevel[V any](lvl int) ConcurrentMap[V] {
+	m := ConcurrentMap[V]{
+		shardCount: lvl,
+		shards:     make([]*Shard[V], lvl),
+	}
+	for i := 0; i < lvl; i++ {
+		m.shards[i] = &Shard[V]{
+			items: make(map[string]V),
+		}
 	}
 	return m
 }
 
 // GetShard returns shard under given key
-func (m ConcurrentMap[V]) GetShard(key string) *ConcurrentMapShared[V] {
-	return m[uint(fnv32(key))%uint(SHARD_COUNT)]
+func (m ConcurrentMap[V]) GetShard(key string) *Shard[V] {
+	return m.shards[uint(fnv32(key))%uint(m.shardCount)]
 }
 
 func (m ConcurrentMap[V]) MSet(data map[string]V) {
@@ -93,8 +119,8 @@ func (m ConcurrentMap[V]) Get(key string) (V, bool) {
 // Count returns the number of elements within the map.
 func (m ConcurrentMap[V]) Count() int {
 	count := 0
-	for i := 0; i < SHARD_COUNT; i++ {
-		shard := m[i]
+	for i := 0; i < m.shardCount; i++ {
+		shard := m.shards[i]
 		shard.Lock()
 		count += len(shard.items)
 		shard.Unlock()
@@ -199,15 +225,15 @@ func (m ConcurrentMap[V]) Clear() {
 // before all the channels are populated using goroutines.
 func snapshot[V any](m ConcurrentMap[V]) (chans []chan Tuple[V]) {
 	//When you access map items before initializing.
-	if len(m) == 0 {
+	if len(m.shards) == 0 {
 		panic(`cmap.ConcurrentMap is not initialized. Should run New() before usage.`)
 	}
-	chans = make([]chan Tuple[V], SHARD_COUNT)
+	chans = make([]chan Tuple[V], m.shardCount)
 	wg := sync.WaitGroup{}
-	wg.Add(SHARD_COUNT)
+	wg.Add(m.shardCount)
 	// Foreach shard.
-	for index, shard := range m {
-		go func(index int, shard *ConcurrentMapShared[V]) {
+	for index, shard := range m.shards {
+		go func(index int, shard *Shard[V]) {
 			// Foreach key, value pair.
 			shard.Lock()
 			chans[index] = make(chan Tuple[V], len(shard.items))
@@ -260,8 +286,8 @@ type IterCb[V any] func(key string, v V)
 // Callback based iterator, cheapest way to read
 // all elements in a map.
 func (m ConcurrentMap[V]) IterCb(fn IterCb[V]) {
-	for idx := range m {
-		shard := (m)[idx]
+	for idx := range m.shards {
+		shard := (m.shards)[idx]
 		shard.Lock()
 		for key, value := range shard.items {
 			fn(key, value)
@@ -277,9 +303,9 @@ func (m ConcurrentMap[V]) Keys() []string {
 	go func() {
 		// Foreach shard.
 		wg := sync.WaitGroup{}
-		wg.Add(SHARD_COUNT)
-		for _, shard := range m {
-			go func(shard *ConcurrentMapShared[V]) {
+		wg.Add(m.shardCount)
+		for _, shard := range m.shards {
+			go func(shard *Shard[V]) {
 				// Foreach key, value pair.
 				shard.Lock()
 				for key := range shard.items {
