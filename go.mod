@@ -1,3 +1,3 @@
-module github.com/orcaman/concurrent-map/v2
+module github.com/pmrt/concurrent-map
 
 go 1.18
