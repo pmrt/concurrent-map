@@ -7,31 +7,18 @@ import (
 
 var DefaultShardCount = 32
 
+// A "thread" safe map of type string:Anything.
+// To avoid lock bottlenecks this map is dived to several map shards.
 type ConcurrentMap[V any] struct {
 	shardCount int
 	shards     []*Shard[V]
 }
 
-// A "thread" safe map of type string:Anything.
-// To avoid lock bottlenecks this map is dived to several map shards.
-// type CMap[V any] []*Shard[V]
-
 // A "thread" safe string to anything map.
 type Shard[V any] struct {
 	items      map[string]V
-	sync.Mutex // Read Write mutex, guards access to internal map.
+	sync.Mutex // Guards access to internal map.
 }
-
-// Creates a new concurrent map.
-// func New[V any]() CMap[V] {
-// 	m := make(CMap[V], DefaultShardCount)
-// 	for i := 0; i < DefaultShardCount; i++ {
-// 		m[i] = &Shard[V]{
-// 			items: make(map[string]V),
-// 		}
-// 	}
-// 	return m
-// }
 
 func New[V any]() ConcurrentMap[V] {
 	return NewWithConcurrencyLevel[V](DefaultShardCount)
