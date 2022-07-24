@@ -13,8 +13,8 @@ type ConcurrentMap[V any] []*ConcurrentMapShared[V]
 
 // A "thread" safe string to anything map.
 type ConcurrentMapShared[V any] struct {
-	items        map[string]V
-	sync.RWMutex // Read Write mutex, guards access to internal map.
+	items      map[string]V
+	sync.Mutex // Read Write mutex, guards access to internal map.
 }
 
 // Creates a new concurrent map.
@@ -83,10 +83,10 @@ func (m ConcurrentMap[V]) SetIfAbsent(key string, value V) bool {
 func (m ConcurrentMap[V]) Get(key string) (V, bool) {
 	// Get shard
 	shard := m.GetShard(key)
-	shard.RLock()
+	shard.Lock()
 	// Get item from shard.
 	val, ok := shard.items[key]
-	shard.RUnlock()
+	shard.Unlock()
 	return val, ok
 }
 
@@ -95,9 +95,9 @@ func (m ConcurrentMap[V]) Count() int {
 	count := 0
 	for i := 0; i < SHARD_COUNT; i++ {
 		shard := m[i]
-		shard.RLock()
+		shard.Lock()
 		count += len(shard.items)
-		shard.RUnlock()
+		shard.Unlock()
 	}
 	return count
 }
@@ -106,10 +106,10 @@ func (m ConcurrentMap[V]) Count() int {
 func (m ConcurrentMap[V]) Has(key string) bool {
 	// Get shard
 	shard := m.GetShard(key)
-	shard.RLock()
+	shard.Lock()
 	// See if element is within shard.
 	_, ok := shard.items[key]
-	shard.RUnlock()
+	shard.Unlock()
 	return ok
 }
 
@@ -209,13 +209,13 @@ func snapshot[V any](m ConcurrentMap[V]) (chans []chan Tuple[V]) {
 	for index, shard := range m {
 		go func(index int, shard *ConcurrentMapShared[V]) {
 			// Foreach key, value pair.
-			shard.RLock()
+			shard.Lock()
 			chans[index] = make(chan Tuple[V], len(shard.items))
 			wg.Done()
 			for key, val := range shard.items {
 				chans[index] <- Tuple[V]{key, val}
 			}
-			shard.RUnlock()
+			shard.Unlock()
 			close(chans[index])
 		}(index, shard)
 	}
@@ -262,11 +262,11 @@ type IterCb[V any] func(key string, v V)
 func (m ConcurrentMap[V]) IterCb(fn IterCb[V]) {
 	for idx := range m {
 		shard := (m)[idx]
-		shard.RLock()
+		shard.Lock()
 		for key, value := range shard.items {
 			fn(key, value)
 		}
-		shard.RUnlock()
+		shard.Unlock()
 	}
 }
 
@@ -281,11 +281,11 @@ func (m ConcurrentMap[V]) Keys() []string {
 		for _, shard := range m {
 			go func(shard *ConcurrentMapShared[V]) {
 				// Foreach key, value pair.
-				shard.RLock()
+				shard.Lock()
 				for key := range shard.items {
 					ch <- key
 				}
-				shard.RUnlock()
+				shard.Unlock()
 				wg.Done()
 			}(shard)
 		}
