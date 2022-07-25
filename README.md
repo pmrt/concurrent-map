@@ -1,11 +1,11 @@
 # Concurrent-map
 
-Concurrent map based on the popular project [here](https://github.com/orcaman/concurrent-map). The documentation and API is the same except for the documented changes here.
+Concurrent sharded map forked and based on the popular project [here](https://github.com/orcaman/concurrent-map). The documentation and API is the same except for the documented changes here.
 
 ## Changes
 
 - Changed RWMutex to Mutex.
-- Added NewWithConcurrencyLevel() to specify level of concurrency, which determines the number of shards.
+- Added NewWithConcurrencyLevel() to specify level of concurrency, which determines the number of shards which will be used.
 - Prevents false sharing.
 
 This version of concurrent sharded map is optimized for use cases which require many new disjoint keys and the number of reads/writes is similar.
@@ -24,13 +24,13 @@ or (2) when multiple goroutines read, write, and overwrite entries for disjoint
 sets of keys. In these two cases, use of a Map may significantly reduce lock
 contention compared to a Go map paired with a separate Mutex or RWMutex.
 
-So sync.Map is ideal for append-only use cases, like caches but it is [not that good for plain new disjoint keys](https://github.com/golang/go/issues/21035) or when the number of reads/writes is similar like in filters or rate-limiters which are constantly storing new objects (e.g.: IPs) and checking if they are present in the filter right before writing them otherwise. This is because when using structures which are not read predominant sync.Map never promotes the elements to the read-only map which is way faster and sync.Map only uses a single mutex for the entire internal map structure.
+So sync.Map is ideal for append-only use cases, like caches but it is [not that good for plain new disjoint keys](https://github.com/golang/go/issues/21035) or when the number of reads/writes is similar like in filters or rate-limiters which are constantly storing new objects (e.g.: IPs) and checking if they are present in the filter right before writing them otherwise. This is mainly because sync.Map uses a single mutex for the entire internal map structure and when using structures which are not read predominant, sync.Map never promotes the elements to the read-only map, which is way faster.
 
-Here is when sharded concurrent maps become handy. Splitting the map structure into shards where every shard has its own mutex is a good way to reduce contention when there are many new disjoint keys. Now reading/writing keys only locks elements in the same shard.
+Here is when sharded concurrent maps become handy. Splitting the map structure into shards where every shard has its own mutex is a good way to reduce contention when there are many new disjoint keys. Elements are stored in a shard depending on the hash which, with the appropiate hash function, are expected to be equally distributed across the map. Now reading/writing keys only locks elements in the same shard.
 
 Now, the original concurrent-map version used ReadWrite mutexes and a RWMutex is not free. It is more expensive than a plain Mutex because it has to keep track of the readers and writers, which leads to cache contention (hardware contention). Sometimes this cost is worth it, especially when there are more readers than writers like in use cases where the data is created and then searched frequently or when the duration of the lock is relatively long and expensive. But in cases where updates are frequent and locks are very short a simple mutex is likely to outperform ReadWrite mutexes. 
 
-And that's why where using a Mutex instead of a ReadWrite mutex. So, this concurrent-map is better suited for cases when you need frequent updates and new disjoint keys are created. Also, the duration of locks in this type of maps is always very short so the overhead of a ReadWriter mutex can dominate the execution cost.
+And that's why where using a Mutex instead of a ReadWrite mutex. So, this concurrent-map is better suited for cases when you need frequent updates and new disjoint keys are created. Also, the duration of locks in this type of maps is always very short so the overhead of a ReadWriter mutex can exceed the execution cost.
 
 ## Benchmarks
 
@@ -67,4 +67,4 @@ Keys-4                            1.83ms ± 2%  1.67ms ± 2%    -8.48%  (p=0.000
 
 As expected, the performance seems generally better for cases where reads and writes are used concurrently like MultiGetSetDifferent and MultiGetSetBlock while the performance is generally the same for map.Sync because it is using the same implementation and is slower for MultiGetSame, where there are multiple concurrent reads.
 
-So, in conclusion, use this version if you need frequent updates and/or you create many new disjoint keys or if your number of reads/writes is similar. If the proportion of readers to writers is way higher in the read side you're probably better off sticking with sync.Map, especially if you have many threads.
+So, in conclusion, use this version if you need frequent updates and/or you create many new disjoint keys or if your number of reads/writes is similar. If the proportion of readers to writers is way higher in the read side you're probably better off sticking with sync.Map, especially if you have device has many threads.
