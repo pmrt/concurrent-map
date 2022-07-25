@@ -3,7 +3,10 @@ package cmap
 import (
 	"encoding/json"
 	"sync"
+	"unsafe"
 )
+
+const cacheLineSize = 128
 
 var DefaultShardCount = 32
 
@@ -14,11 +17,30 @@ type ConcurrentMap[V any] struct {
 	shards     []*Shard[V]
 }
 
+type shardInternal[V any] struct {
+	items      map[string]V
+	sync.Mutex // Guards access to internal map
+}
+
 // A "thread" safe string to anything map.
 type Shard[V any] struct {
-	items      map[string]V
-	sync.Mutex // Guards access to internal map.
+	shardInternal[V]
+
+	// prevents false sharing on widespread architectures.
+	//
+	// The padding could have been the cacheLineSize. But by making the
+	// shardInternal size multiple of the cacheLineSize it aligns to the CPU cache
+	// lines on common architectures (e.g.: if shardInternal size is 128, 256,
+	// etc. the offset is 0). Then we substract this offset size from the
+	// cacheLineSize to get the needed minimum padding size so the struct is
+	// allocated in a different coherence block.
+	pad [cacheLineSize - unsafe.Sizeof(shardInternal[V]{})%cacheLineSize]byte
 }
+
+// type Shard[V any] struct {
+// 	items      map[string]V
+// 	sync.Mutex // Guards access to internal map.
+// }
 
 func New[V any]() ConcurrentMap[V] {
 	return NewWithConcurrencyLevel[V](DefaultShardCount)
@@ -33,7 +55,9 @@ func NewWithConcurrencyLevel[V any](lvl int) ConcurrentMap[V] {
 	}
 	for i := 0; i < lvl; i++ {
 		m.shards[i] = &Shard[V]{
-			items: make(map[string]V),
+			shardInternal: shardInternal[V]{
+				items: make(map[string]V),
+			},
 		}
 	}
 	return m
